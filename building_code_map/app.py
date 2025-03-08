@@ -4,7 +4,8 @@ import dash
 import dash_bootstrap_components as dbc
 from flask import Flask
 
-import geojson_mapper as proj
+from .layout import create_layout
+from .callbacks import register_callbacks
 
 def create_dash_app(server: Flask, url_base_pathname: str = "/"):
     """
@@ -15,12 +16,13 @@ def create_dash_app(server: Flask, url_base_pathname: str = "/"):
         server=server,
         url_base_pathname=url_base_pathname,
         external_stylesheets=[dbc.themes.BOOTSTRAP],
+        suppress_callback_exceptions=True
     )
 
     # Set the layout
-    app.layout = proj.create_layout()
+    app.layout = create_layout()
 
     # Register all callbacks
-    proj.register_callbacks(app)
+    register_callbacks(app)
 
     return app

@@ -1,6 +1,6 @@
 # server.py
 from flask import Flask
-from geojson_mapper import create_dash_app
+from building_code_map import create_dash_app
 
 server = Flask(__name__)
 
