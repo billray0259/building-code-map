@@ -2,12 +2,42 @@ import os
 import dash_bootstrap_components as dbc
 import dash_leaflet as dl
 import json
+import re  # Add regex for name cleaning
 from dash import dcc, html
 from dash.dependencies import Input, Output
+from shapely.geometry import Point, shape
+# Fix the import error - handle different Shapely versions
+try:
+    # For Shapely 2.0+
+    from shapely.errors import GEOSException
+except ImportError:
+    try:
+        # Alternative location in some versions
+        from shapely.errors import TopologyException as GEOSException
+    except ImportError:
+        # Very old versions
+        from shapely.topology import TopologyException as GEOSException
+import logging
+import copy
+
+# Set up logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+# Set up logging to print to console
+console_handler = logging.StreamHandler()
+console_handler.setLevel(logging.INFO)
+formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+console_handler.setFormatter(formatter)
+logger.addHandler(console_handler)
+
 
 def create_layout():
     # Compute the absolute path to the geojson file
     base_path = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
+    
+    polygon_geojson_path = 'data/tl_2024_08_place/tl_2024_08_place.geojson'
+    with open(os.path.join(base_path, polygon_geojson_path)) as f:
+        polygons = json.load(f)
     
     # Load points geojson data
     point_geojson_path = os.path.join(base_path, 'data', 'gracy_3-3.geojson')
@@ -66,6 +96,14 @@ def create_layout():
     # Store both marker sets (IRC and IECC) as separate layer groups
     irc_markers = []
     iecc_markers = []
+    
+    # Function to normalize place names for comparison
+    def normalize_name(name):
+        if not name:
+            return ""
+        # Remove characters like [*] and ? and convert to lowercase
+        cleaned_name = re.sub(r'\[.*?\]|\?', '', str(name)).strip().lower()
+        return cleaned_name
     
     # Process each feature from the GeoJSON
     for feature in points['features']:
@@ -151,6 +189,128 @@ def create_layout():
             )
             iecc_markers.append(iecc_marker)
     
+    # Extract normalized point names for matching with polygons
+    point_name_mapping = {}
+    for feature in points['features']:
+        if 'properties' in feature:
+            raw_name = feature['properties'].get('name', '')
+            normalized_name = normalize_name(raw_name)
+            point_name_mapping[normalized_name] = raw_name
+    
+    # Match polygons to points by name
+    polygon_point_counts = {}
+    polygon_point_names = {}  # Track names of points in each polygon
+    
+    # Process each polygon to find matching points by name
+    for feature in polygons['features']:
+        if 'properties' in feature:
+            polygon_id = feature['properties'].get('GEOID', '')
+            polygon_name = feature['properties'].get('NAME', '')
+            polygon_namelsad = feature['properties'].get('NAMELSAD', '')  # Also try NAMELSAD
+            normalized_polygon_name = normalize_name(polygon_name)
+            normalized_polygon_namelsad = normalize_name(polygon_namelsad)
+            
+            # Initialize counts and name lists
+            polygon_point_counts[polygon_id] = 0
+            polygon_point_names[polygon_id] = []
+            
+            # First try matching on NAME
+            if normalized_polygon_name in point_name_mapping:
+                original_point_name = point_name_mapping[normalized_polygon_name]
+                polygon_point_counts[polygon_id] += 1
+                polygon_point_names[polygon_id].append(original_point_name)
+                logger.info(f"Matched '{original_point_name}' to polygon '{polygon_name}' (ID: {polygon_id})")
+            # If no match with NAME, try NAMELSAD
+            elif normalized_polygon_namelsad in point_name_mapping:
+                original_point_name = point_name_mapping[normalized_polygon_namelsad]
+                polygon_point_counts[polygon_id] += 1
+                polygon_point_names[polygon_id].append(original_point_name)
+                logger.info(f"Matched '{original_point_name}' to polygon '{polygon_namelsad}' (ID: {polygon_id})")
+    
+    # Create a deep copy of the polygons GeoJSON to modify
+    styled_polygons = copy.deepcopy(polygons)
+    
+    # Create individual polygon layers
+    polygon_layers = []
+    
+    for feature in styled_polygons['features']:
+        if 'properties' in feature and 'geometry' in feature:
+            polygon_id = feature['properties'].get('GEOID', None)
+            point_count = polygon_point_counts.get(polygon_id, 0)
+            point_names = polygon_point_names.get(polygon_id, [])
+            
+            # Get city name from polygon properties
+            city_name = feature['properties'].get('NAME', 'Unknown Area')
+            
+            # Determine fill color based on matched points
+            fill_color = color_to_hex.get('grey')  # Default to Unknown/grey color
+            
+            # If we have matched points, look up their codes and colors
+            if point_count > 0:
+                # Find the point in the original points data that matches our polygon
+                for point_feature in points['features']:
+                    if point_feature.get('properties', {}).get('name', '') in point_names:
+                        # Get the IRC code (could use IECC as well depending on requirements)
+                        irc_code = point_feature.get('properties', {}).get('irc', 'Unknown')
+                        # Convert numeric codes to strings
+                        if isinstance(irc_code, (int, float)):
+                            irc_code = str(irc_code)
+                        # Get the color for this code
+                        color_name = color_mapping.get(irc_code, 'grey')
+                        fill_color = color_to_hex.get(color_name, color_to_hex.get('grey'))
+                        # Just use the first match for now
+                        break
+            
+            # Define style based on point count and matched color
+            style = {
+                'weight': 2,
+                'opacity': 0.7,
+                'color': '#4A4A4A',
+                'fillOpacity': 0.4,
+                'fillColor': fill_color
+            }
+            
+            # Create single-feature GeoJSON
+            single_feature_geojson = {
+                "type": "FeatureCollection",
+                "features": [feature]
+            }
+            
+            # Create tooltip content with list of points
+            if point_count > 0:
+                tooltip_content = f"{city_name}: {point_count} {'location' if point_count == 1 else 'locations'}"
+                popup_content = html.Div([
+                    html.H5(f"{city_name}"),
+                    html.P(f"{point_count} {'location' if point_count == 1 else 'locations'}:"),
+                    html.Ul([html.Li(name) for name in point_names])
+                ])
+            else:
+                tooltip_content = f"{city_name}: No data"
+                popup_content = html.Div([
+                    html.H5(f"{city_name}"),
+                    html.P("No building code data available")
+                ])
+            
+            # Create individual polygon layer
+            polygon = dl.GeoJSON(
+                data=single_feature_geojson,
+                id=f'polygon-{polygon_id}',
+                style=style,
+                hoverStyle=dict(weight=3, color='#666', dashArray=''),
+                children=[
+                    dl.Tooltip(tooltip_content),
+                    dl.Popup(popup_content)
+                ]
+            )
+            
+            polygon_layers.append(polygon)
+    
+    # Create a layer group with all polygon layers
+    polygon_layer = dl.LayerGroup(
+        id='polygon-layer',
+        children=polygon_layers
+    )
+    
     # Create layer groups for IRC and IECC markers
     irc_layer = dl.LayerGroup(
         id='irc-layer',
@@ -226,6 +386,7 @@ def create_layout():
                     zoomControl=False,  # Disable default zoom control
                     children=[
                         dl.TileLayer(),
+                        polygon_layer,  # Add polygon layer before markers
                         html.Div(id='active-layer-container'),  # This container will hold active layer
                         # Add custom positioned zoom control
                         dl.ZoomControl(position="bottomright")
