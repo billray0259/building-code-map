@@ -40,7 +40,7 @@ def create_layout():
         polygons = json.load(f)
     
     # Load points geojson data
-    point_geojson_path = os.path.join(base_path, 'data', 'gracy_3-3.geojson')
+    point_geojson_path = os.path.join(base_path, 'data', 'gracy_3-9.geojson')
     with open(point_geojson_path) as f:
         points = json.load(f)
 
@@ -387,7 +387,7 @@ def create_layout():
                     children=[
                         dl.TileLayer(),
                         polygon_layer,  # Add polygon layer before markers
-                        html.Div(id='active-layer-container'),  # This container will hold active layer
+                        # html.Div(id='active-layer-container'),  # This container will hold active layer
                         # Add custom positioned zoom control
                         dl.ZoomControl(position="bottomright")
                     ],
