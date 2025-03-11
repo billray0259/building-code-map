@@ -19,6 +19,7 @@ except ImportError:
         from shapely.topology import TopologyException as GEOSException
 import logging
 import copy
+from .config import GEOJSON_FILENAME
 
 # Set up logging
 logging.basicConfig(level=logging.INFO)
@@ -40,7 +41,7 @@ def create_layout():
         polygons = json.load(f)
     
     # Load points geojson data
-    point_geojson_path = os.path.join(base_path, 'data', 'gracy_3-9.geojson')
+    point_geojson_path = os.path.join(base_path, 'data', GEOJSON_FILENAME)
     with open(point_geojson_path) as f:
         points = json.load(f)
 
@@ -348,6 +349,7 @@ def create_layout():
                                     options=[
                                         {'label': 'IRC (Residential)', 'value': 'irc'},
                                         {'label': 'IECC (Energy)', 'value': 'iecc'},
+                                        {'label': 'Combined Code Mode', 'value': 'combined'},
                                     ],
                                     value='irc',  # Default to IRC
                                     inline=True,
@@ -359,16 +361,21 @@ def create_layout():
                                 dbc.Checkbox(
                                     id='show-unknown-toggle',
                                     label="Show Unknown Codes",
-                                    value=True,  # Default to showing unknown codes
+                                    value=False,  # Default to showing unknown codes
                                     className="mb-0 mt-2"
                                 ),
+                                dbc.Checkbox(
+                                    id='pin-toggle',
+                                    label="Show Pins",
+                                    value=True,  # Default to showing pins
+                                    className="mb-3 mt-2"
+                                )
                             ], md=6),
                         ]),
-                        
-                        # Legend section
+                        # Legend section updated
                         html.Hr(),
                         html.H6("Legend:"),
-                        html.Div(legend_items, style={'display': 'flex', 'flexWrap': 'wrap'})
+                        html.Div(id="legend-div", style={'display': 'flex', 'flexWrap': 'wrap'})
                     ])
                 ], className="shadow-sm", style={'position': 'absolute', 'top': '10px', 'left': '10px', 
                                                  'zIndex': 1000, 'width': '400px', 'maxWidth': '90%'})
@@ -387,7 +394,7 @@ def create_layout():
                     children=[
                         dl.TileLayer(),
                         polygon_layer,  # Add polygon layer before markers
-                        # html.Div(id='active-layer-container'),  # This container will hold active layer
+                        html.Div(id='active-layer-container'),  # This container will hold active layer
                         # Add custom positioned zoom control
                         dl.ZoomControl(position="bottomright")
                     ],
